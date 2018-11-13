@@ -24,7 +24,7 @@ namespace internal {
 
 // copy_using_evaluator_traits is based on assign_traits
 
-template <typename DstEvaluator, typename SrcEvaluator, typename AssignFunc>
+template <typename DstEvaluator, typename SrcEvaluator, typename AssignFunc, int MaxPacketSize = -1>
 struct copy_using_evaluator_traits
 {
   typedef typename DstEvaluator::XprType Dst;
@@ -51,13 +51,15 @@ private:
     InnerMaxSize = int(Dst::IsVectorAtCompileTime) ? int(Dst::MaxSizeAtCompileTime)
               : int(DstFlags)&RowMajorBit ? int(Dst::MaxColsAtCompileTime)
               : int(Dst::MaxRowsAtCompileTime),
+    RestrictedInnerSize = InnerSize == -1 ? MaxPacketSize : InnerSize,
+    RestrictedLinearSize = Dst::SizeAtCompileTime == -1 ? MaxPacketSize : Dst::SizeAtCompileTime,
     OuterStride = int(outer_stride_at_compile_time<Dst>::ret),
     MaxSizeAtCompileTime = Dst::SizeAtCompileTime
   };
 
   // TODO distinguish between linear traversal and inner-traversals
-  typedef typename find_best_packet<DstScalar,Dst::SizeAtCompileTime>::type LinearPacketType;
-  typedef typename find_best_packet<DstScalar,InnerSize>::type InnerPacketType;
+  typedef typename find_best_packet<DstScalar,RestrictedLinearSize>::type LinearPacketType;
+  typedef typename find_best_packet<DstScalar,RestrictedInnerSize>::type InnerPacketType;
 
   enum {
     LinearPacketSize = unpacket_traits<LinearPacketType>::size,
@@ -697,6 +699,27 @@ protected:
   DstXprType& m_dstExpr;
 };
 
+// Special kernel used when computing small products whose operands have dynamic dimensions.  It ensures that the
+// PacketSize used is no larger than 4, thereby increasing the chance that vectorized instructions will be used
+// when computing the product.
+
+template<typename DstEvaluatorTypeT, typename SrcEvaluatorTypeT, typename Functor>
+class restricted_packet_dense_assignment_kernel : public generic_dense_assignment_kernel<DstEvaluatorTypeT, SrcEvaluatorTypeT, Functor, BuiltIn>
+{
+protected:
+  typedef generic_dense_assignment_kernel<DstEvaluatorTypeT, SrcEvaluatorTypeT, Functor, BuiltIn> Base;
+ public:
+    typedef typename Base::Scalar Scalar;
+    typedef typename Base::DstXprType DstXprType;
+    typedef copy_using_evaluator_traits<DstEvaluatorTypeT, SrcEvaluatorTypeT, Functor, 4> AssignmentTraits;
+    typedef typename AssignmentTraits::PacketType PacketType;
+    
+    EIGEN_DEVICE_FUNC restricted_packet_dense_assignment_kernel(DstEvaluatorTypeT &dst, const SrcEvaluatorTypeT &src, const Functor &func, DstXprType& dstExpr)
+    : Base(dst, src, func, dstExpr)
+  {
+  }
+ };
+ 
 /***************************************************************************
 * Part 5 : Entry point for dense rectangular assignment
 ***************************************************************************/
