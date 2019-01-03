@@ -262,7 +262,24 @@ EIGEN_STRONG_INLINE Packet8d pmax<Packet8d>(const Packet8d& a,
   return _mm512_max_pd(b, a);
 }
 
-template<> EIGEN_STRONG_INLINE Packet16i pcmp_eq(const Packet16i& a, const Packet16i& b) {
+#ifdef EIGEN_VECTORIZE_AVX512DQ
+template<int I> EIGEN_STRONG_INLINE Packet8f extract256(Packet16f x) { return _mm512_extractf32x8_ps(x,I); }
+template<int I> EIGEN_STRONG_INLINE Packet2d extract128(Packet8d x) { return _mm512_extractf64x2_pd(x,I); }
+EIGEN_STRONG_INLINE Packet16f cat256(Packet8f a, Packet8f b) { return _mm512_insertf32x8(_mm512_castps256_ps512(a),b,1); }
+#else
+// AVX512F does not define _mm512_extractf32x8_ps to extract _m256 from _m512
+template<int I> EIGEN_STRONG_INLINE Packet8f extract256(Packet16f x) {
+  return  _mm256_castsi256_ps(_mm512_extracti64x4_epi64( _mm512_castps_si512(x),I));
+}
+
+// AVX512F does not define _mm512_extractf64x2_pd to extract _m128 from _m512
+template<int I> EIGEN_STRONG_INLINE Packet2d extract128(Packet8d x) {
+  return _mm_castsi128_pd(_mm512_extracti32x4_epi32( _mm512_castpd_si512(x),I));
+}
+
+#endif
+
+ template<> EIGEN_STRONG_INLINE Packet16i pcmp_eq(const Packet16i& a, const Packet16i& b) {
   __m256i lo = _mm256_cmpeq_epi32(_mm512_extracti64x4_epi64(a, 0), _mm512_extracti64x4_epi64(b, 0));
   __m256i hi = _mm256_cmpeq_epi32(_mm512_extracti64x4_epi64(a, 1), _mm512_extracti64x4_epi64(b, 1));
   return _mm512_inserti64x4(_mm512_castsi256_si512(lo), hi, 1);
